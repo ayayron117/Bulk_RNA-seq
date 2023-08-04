@@ -1,0 +1,851 @@
+---
+title: "Niti's Project"
+author: "Aaron Mohammed"
+date: "2023-05-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+library(DESeq2)
+library(tximport)
+library(EnhancedVolcano)
+library(pheatmap)
+library(grid)
+library(clusterProfiler)
+library(org.Mm.eg.db)
+library(KEGG.db)
+library(enrichplot)
+
+proj_path <- "/Users/asm/Creighton/core_lab/niti_may_23_23"
+
+s_info <- read.csv(file.path(proj_path, "sample_sheet.csv"), header = TRUE)
+
+string_results <- file.path(proj_path, "string_tie")
+
+final_results <- file.path(proj_path, "output_2")
+dir.create(final_results)
+
+deg_results <- file.path(final_results, "DESeq2_results")
+dir.create(deg_results)
+
+top_degs_dir <- file.path(deg_results, "top_degs")
+dir.create(top_degs_dir)
+
+vol_dir <- file.path(final_results, "volcano_plots")
+dir.create(vol_dir)
+
+heat_dir <- file.path(final_results, "heatmaps")
+dir.create(heat_dir)
+
+clustered_heat_dir <- file.path(heat_dir, "clustered")
+dir.create(clustered_heat_dir)
+
+
+
+
+### GO ###
+go_dir <- file.path(final_results, "GO")
+dir.create(go_dir)
+
+#ora
+go_ora_dir <- file.path(go_dir, "ORA")
+dir.create(go_ora_dir)
+
+go_ora_up_dir <- file.path(go_ora_dir, "UP")
+dir.create(go_ora_up_dir)
+go_ora_up_plots <- file.path(go_ora_up_dir, "plots")
+dir.create(go_ora_up_plots)
+
+go_ora_down_dir <- file.path(go_ora_dir, "DOWN")
+dir.create(go_ora_down_dir)
+go_ora_down_plots <- file.path(go_ora_down_dir, "plots")
+dir.create(go_ora_down_plots)
+
+#gsea
+go_gsea_dir <- file.path(go_dir, "GSEA")
+dir.create(go_gsea_dir)
+
+go_gsea_up_dir <- file.path(go_gsea_dir, "UP")
+dir.create(go_gsea_up_dir)
+go_gsea_up_plots <- file.path(go_gsea_up_dir, "plots")
+dir.create(go_gsea_up_plots)
+
+go_gsea_down_dir <- file.path(go_gsea_dir, "DOWN")
+dir.create(go_gsea_down_dir)
+go_gsea_down_plots <- file.path(go_gsea_down_dir, "plots")
+dir.create(go_gsea_down_plots)
+
+
+
+### KEGG ###
+kegg_dir <- file.path(final_results, "KEGG")
+dir.create(kegg_dir)
+
+#ora
+kegg_ora_dir <- file.path(kegg_dir, "ORA")
+dir.create(kegg_ora_dir)
+
+kegg_ora_up_dir <- file.path(kegg_ora_dir, "UP")
+dir.create(kegg_ora_up_dir)
+kegg_ora_up_plots <- file.path(kegg_ora_up_dir, "plots")
+dir.create(kegg_ora_up_plots)
+
+kegg_ora_down_dir <- file.path(kegg_ora_dir, "DOWN")
+dir.create(kegg_ora_down_dir)
+kegg_ora_down_plots <- file.path(kegg_ora_down_dir, "plots")
+dir.create(kegg_ora_down_plots)
+
+#gsea
+kegg_gsea_dir <- file.path(kegg_dir, "GSEA")
+dir.create(kegg_gsea_dir)
+
+kegg_gsea_up_dir <- file.path(kegg_gsea_dir, "UP")
+dir.create(kegg_gsea_up_dir)
+kegg_gsea_up_plots <- file.path(kegg_gsea_up_dir, "plots")
+dir.create(kegg_gsea_up_plots)
+
+kegg_gsea_down_dir <- file.path(kegg_gsea_dir, "DOWN")
+dir.create(kegg_gsea_down_dir)
+kegg_gsea_down_plots <- file.path(kegg_gsea_down_dir, "plots")
+dir.create(kegg_gsea_down_plots)
+
+
+hm_colors <- colorRampPalette(c("#4ba9e7", "#0F5B8D", "#043250", "black", 
+                                "#741C03", "#A92F08", "#FC4911"))
+
+```
+
+
+```{r}
+
+files <- file.path(string_results,s_info$NAME,'t_data.ctab')
+names(files)<-s_info$NAME
+tmp<-read.table(files[1],sep='\t',header=TRUE)
+tx2gene <- tmp[, c("t_name", "gene_id")]
+txi <- tximport(files, type = "stringtie", tx2gene = tx2gene)
+
+write.csv(txi$abundance, file.path(final_results, "expression_table.csv"))
+
+s_info$CONDITION <- factor(s_info$CONDITION)
+
+ddsTxi <- DESeqDataSetFromTximport(txi, colData = s_info, design = ~ CONDITION)
+dds <- DESeq(ddsTxi)
+
+```
+
+```{r}
+
+# log transformation
+rld <- rlogTransformation(dds)
+# plot PCA with integrated command in DEseq2
+pca_plot <- plotPCA(rld, intgroup="CONDITION")
+
+pca_plot
+
+pdf(file.path(final_results, "pca_plot.pdf"))
+pca_plot
+dev.off()
+
+```
+
+```{r}
+
+TU_N_TU_V <- lfcShrink(dds, contrast= c("CONDITION", "TU_N_UV", "TU_V_UV"), type="normal")
+TU_N_TU_V_df <- data.frame(log2FC = TU_N_TU_V$log2FoldChange, pvalue = TU_N_TU_V$pvalue, padj = TU_N_TU_V$padj)
+row.names(TU_N_TU_V_df) <- row.names(TU_N_TU_V)
+TU_N_TU_V_df <- TU_N_TU_V_df[order(-TU_N_TU_V_df$log2FC),]
+TU_N_TU_V_df <- TU_N_TU_V_df[-which(is.na(TU_N_TU_V_df$log2FC)), ]
+write.csv(TU_N_TU_V_df, file.path(deg_results, "TU_N_vs_TU_V.csv"))
+
+TU_V_AT_V <- lfcShrink(dds, contrast= c("CONDITION", "TU_V_UV", "AT_V_UV"), type="normal")
+TU_V_AT_V_df <- data.frame(log2FC = TU_V_AT_V$log2FoldChange, pvalue = TU_V_AT_V$pvalue, padj = TU_V_AT_V$padj)
+row.names(TU_V_AT_V_df) <- row.names(TU_V_AT_V)
+TU_V_AT_V_df <- TU_V_AT_V_df[order(-TU_V_AT_V_df$log2FC),]
+TU_V_AT_V_df <- TU_V_AT_V_df[-which(is.na(TU_V_AT_V_df$log2FC)), ]
+write.csv(TU_V_AT_V_df, file.path(deg_results, "TU_V_vs_AT_V.csv"))
+
+AT_N_AT_V <- lfcShrink(dds, contrast= c("CONDITION", "AT_N_UV", "AT_V_UV"), type="normal")
+AT_N_AT_V_df <- data.frame(log2FC = AT_N_AT_V$log2FoldChange, pvalue = AT_N_AT_V$pvalue, padj = AT_N_AT_V$padj)
+row.names(AT_N_AT_V_df) <- row.names(AT_N_AT_V)
+AT_N_AT_V_df <- AT_N_AT_V_df[order(-AT_N_AT_V_df$log2FC),]
+AT_N_AT_V_df <- AT_N_AT_V_df[-which(is.na(AT_N_AT_V_df$log2FC)), ]
+write.csv(AT_N_AT_V_df, file.path(deg_results, "AT_N_vs_AT_V.csv"))
+
+TU_V_HC_V <- lfcShrink(dds, contrast= c("CONDITION", "TU_V_UV", "HC_V"), type="normal")
+TU_V_HC_V_df <- data.frame(log2FC = TU_V_HC_V$log2FoldChange, pvalue = TU_V_HC_V$pvalue, padj = TU_V_HC_V$padj)
+row.names(TU_V_HC_V_df) <- row.names(TU_V_HC_V)
+TU_V_HC_V_df <- TU_V_HC_V_df[order(-TU_V_HC_V_df$log2FC),]
+TU_V_HC_V_df <- TU_V_HC_V_df[-which(is.na(TU_V_HC_V_df$log2FC)), ]
+write.csv(TU_V_HC_V_df, file.path(deg_results, "TU_V_vs_HC_V.csv"))
+
+HC_N_HC_V <- lfcShrink(dds, contrast= c("CONDITION", "HC_N", "HC_V"), type="normal")
+HC_N_HC_V_df <- data.frame(log2FC = HC_N_HC_V$log2FoldChange, pvalue = HC_N_HC_V$pvalue, padj = HC_N_HC_V$padj)
+row.names(HC_N_HC_V_df) <- row.names(HC_N_HC_V)
+HC_N_HC_V_df <- HC_N_HC_V_df[order(-HC_N_HC_V_df$log2FC),]
+HC_N_HC_V_df <- HC_N_HC_V_df[-which(is.na(HC_N_HC_V_df$log2FC)), ]
+write.csv(HC_N_HC_V_df, file.path(deg_results, "HC_N_vs_HC_V.csv"))
+
+```
+
+```{r}
+
+TU_N_TU_V_vplot <- EnhancedVolcano(TU_N_TU_V_df, 
+                x="log2FC", y="pvalue", 
+                lab= NA,
+                pCutoff = 0.05, FCcutoff = 0.5,
+                title = "TU_N_UV vs TU_V_UV",
+                subtitle = bquote(italic("FC cutoff = 0.5     p-value cutoff = 0.05")))
+
+TU_V_AT_V_vplot <- EnhancedVolcano(TU_V_AT_V_df, 
+                x="log2FC", y="pvalue", 
+                lab= NA,
+                pCutoff = 0.05, FCcutoff = 1,
+                title = "TU_V_UV vs AT_V_UV",
+                subtitle = bquote(italic("FC cutoff = 1     p-value cutoff = 0.05")))
+
+AT_N_AT_V_vplot <- EnhancedVolcano(AT_N_AT_V_df, 
+                x="log2FC", y="pvalue", 
+                lab= NA,
+                pCutoff = 0.05, FCcutoff = 0.5,
+                title = "AT_N_UV vs AT_V_UV",
+                subtitle = bquote(italic("FC cutoff = 0.5     p-value cutoff = 0.05")))
+
+TU_V_HC_V_vplot <- EnhancedVolcano(TU_V_HC_V_df, 
+                x="log2FC", y="pvalue", 
+                lab= NA,
+                pCutoff = 0.05, FCcutoff = 1,
+                title = "TU_V_UV vs HC_V_UV",
+                subtitle = bquote(italic("FC cutoff = 1     p-value cutoff = 0.05")))
+
+HC_N_HC_V_vplot <- EnhancedVolcano(HC_N_HC_V_df, 
+                x="log2FC", y="pvalue", 
+                lab= NA,
+                pCutoff = 0.05, FCcutoff = 0.5,
+                title = "HC_N_UV vs HC_V_UV",
+                subtitle = bquote(italic("FC cutoff = 0.5     p-value cutoff = 0.05")))
+
+TU_N_TU_V_vplot
+TU_V_AT_V_vplot
+AT_N_AT_V_vplot
+TU_V_HC_V_vplot
+HC_N_HC_V_vplot
+
+```
+
+```{r}
+
+pdf(file.path(vol_dir, "TU_N_vs_TU_V_vplot.pdf"))
+TU_N_TU_V_vplot
+dev.off()
+
+pdf(file.path(vol_dir, "TU_V_vs_AT_V_vplot.pdf"))
+TU_V_AT_V_vplot
+dev.off()
+
+pdf(file.path(vol_dir, "AT_N_vs_AT_V_vplot.pdf"))
+AT_N_AT_V_vplot
+dev.off()
+
+pdf(file.path(vol_dir, "TU_V_vs_HC_V_vplot.pdf"))
+TU_V_HC_V_vplot
+dev.off()
+
+pdf(file.path(vol_dir, "HC_N_vs_HC_V_vplot.pdf"))
+HC_N_HC_V_vplot
+dev.off()
+
+```
+
+
+```{r}
+
+TU_N_TU_V_up <- TU_N_TU_V_df[which(TU_N_TU_V_df$log2FC >= 0.5 & TU_N_TU_V_df$pvalue <= 0.05), ]
+TU_N_TU_V_up_50 <- TU_N_TU_V_up[1:50, ]
+
+TU_N_TU_V_down <- TU_N_TU_V_df[which(TU_N_TU_V_df$log2FC <= -0.5 & TU_N_TU_V_df$pvalue <= 0.05), ]
+TU_N_TU_V_down <- TU_N_TU_V_down[order(TU_N_TU_V_down$log2FC), ]
+TU_N_TU_V_down_50 <- TU_N_TU_V_down[1:50, ]
+
+TU_N_TU_V_top_degz <- rbind(TU_N_TU_V_up, TU_N_TU_V_down)
+
+write.csv(TU_N_TU_V_top_degz, file.path(top_degs_dir, "TU_N_TU_V_top_degs.csv"))
+
+
+
+
+
+
+
+
+TU_V_AT_V_up <- TU_V_AT_V_df[which(TU_V_AT_V_df$log2FC >= 1 & TU_V_AT_V_df$pvalue <= 0.05), ]
+TU_V_AT_V_up_50 <- TU_V_AT_V_up[1:50, ]
+
+TU_V_AT_V_down <- TU_V_AT_V_df[which(TU_V_AT_V_df$log2FC <= -1 & TU_V_AT_V_df$pvalue <= 0.05), ]
+TU_V_AT_V_down <- TU_V_AT_V_down[order(TU_V_AT_V_down$log2FC), ]
+TU_V_AT_V_down_50 <- TU_V_AT_V_down[1:50, ]
+
+TU_V_AT_V_top_degz <- rbind(TU_V_AT_V_up, TU_V_AT_V_down)
+
+write.csv(TU_V_AT_V_top_degz, file.path(top_degs_dir, "TU_V_AT_V_top_degs.csv"))
+
+
+
+
+
+
+
+
+
+AT_N_AT_V_up <- AT_N_AT_V_df[which(AT_N_AT_V_df$log2FC >= 0.5 & AT_N_AT_V_df$pvalue <= 0.05), ]
+AT_N_AT_V_up_50 <- AT_N_AT_V_up[1:50, ]
+
+AT_N_AT_V_down <- AT_N_AT_V_df[which(AT_N_AT_V_df$log2FC <= -0.5 & AT_N_AT_V_df$pvalue <= 0.05), ]
+AT_N_AT_V_down <- AT_N_AT_V_down[order(AT_N_AT_V_down$log2FC), ]
+AT_N_AT_V_down_50 <- AT_N_AT_V_down[1:50, ]
+
+AT_N_AT_V_top_degz <- rbind(AT_N_AT_V_up, AT_N_AT_V_down)
+
+write.csv(AT_N_AT_V_top_degz, file.path(top_degs_dir, "AT_N_AT_V_top_degs.csv"))
+
+
+
+
+
+
+
+
+TU_V_HC_V_up <- TU_V_HC_V_df[which(TU_V_HC_V_df$log2FC >= 1 & TU_V_HC_V_df$pvalue <= 0.05), ]
+TU_V_HC_V_up_50 <- TU_V_HC_V_up[1:50, ]
+
+TU_V_HC_V_down <- TU_V_HC_V_df[which(TU_V_HC_V_df$log2FC <= -1 & TU_V_HC_V_df$pvalue <= 0.05), ]
+TU_V_HC_V_down <- TU_V_HC_V_down[order(TU_V_HC_V_down$log2FC), ]
+TU_V_HC_V_down_50 <- TU_V_HC_V_down[1:50, ]
+
+TU_V_HC_V_top_degz <- rbind(TU_V_HC_V_up, TU_V_HC_V_down)
+
+write.csv(TU_V_HC_V_top_degz, file.path(top_degs_dir, "TU_V_HC_V_top_degs.csv"))
+
+
+
+
+
+
+
+HC_N_HC_V_up <- HC_N_HC_V_df[which(HC_N_HC_V_df$log2FC >= 0.5 & HC_N_HC_V_df$pvalue <= 0.05), ]
+HC_N_HC_V_up_50 <- HC_N_HC_V_up[1:50, ]
+
+HC_N_HC_V_down <- HC_N_HC_V_df[which(HC_N_HC_V_df$log2FC <= -0.5 & HC_N_HC_V_df$pvalue <= 0.05), ]
+HC_N_HC_V_down <- HC_N_HC_V_down[order(HC_N_HC_V_down$log2FC), ]
+HC_N_HC_V_down_50 <- HC_N_HC_V_down[1:50, ]
+
+HC_N_HC_V_top_degz <- rbind(HC_N_HC_V_up, HC_N_HC_V_down)
+
+write.csv(HC_N_HC_V_top_degz, file.path(top_degs_dir, "HC_N_HC_V_top_degs.csv"))
+
+```
+
+```{r}
+                                
+TU_N_TU_V_t_heat <- rbind(TU_N_TU_V_up_50, TU_N_TU_V_down_50)
+                                
+TU_N_TU_V_t_namez <- rownames(TU_N_TU_V_t_heat )
+
+sample_names <- colnames(txi$abundance)
+
+
+
+TU_N_TU_V_exp <- txi$abundance[ , c(which(grepl("TU_V_UV", sample_names)),
+                                   which(grepl("TU_N_UV", sample_names)))]
+
+
+
+TU_N_TU_V_exp_top <- TU_N_TU_V_exp[TU_N_TU_V_t_namez, ]
+
+TU_N_TU_V_heat <- pheatmap(TU_N_TU_V_exp_top, cluster_rows = FALSE, cluster_cols = FALSE, fontsize_row = 40, hm_colors(500), scale= "row", cellwidth = 150, cellheight = 60, angle_col=45, fontsize_col=50)
+
+pdf(file.path(heat_dir, "TU_N_TU_V_exp_heatmap.pdf"), width=45, height=90)
+TU_N_TU_V_heat
+dev.off()
+
+
+
+TU_N_TU_V_heat_c <- pheatmap(TU_N_TU_V_exp_top, cluster_rows = TRUE, cluster_cols = FALSE, fontsize_row = 40, hm_colors(500), scale= "row", cellwidth = 150, cellheight = 60, treeheight_row=600, treeheight_col = 80, angle_col=45, fontsize_col=50)
+
+TU_N_TU_V_heat_c$gtable$grobs[[1]]$gp <- gpar(lwd = 7)
+
+pdf(file.path(clustered_heat_dir, "TU_N_TU_V_exp_heatmap_clustered.pdf"), width=55, height=90)
+TU_N_TU_V_heat_c
+dev.off()
+
+
+```
+
+```{r}
+
+TU_V_AT_V_t_heat <- rbind(TU_V_AT_V_up_50, TU_V_AT_V_down_50)
+                                
+TU_V_AT_V_t_namez <- rownames(TU_V_AT_V_t_heat )
+
+sample_names <- colnames(txi$abundance)
+
+
+
+TU_V_AT_V_exp <- txi$abundance[ , c(which(grepl("AT_V_UV", sample_names)),
+                                   which(grepl("TU_V_UV", sample_names)))]
+
+
+
+TU_V_AT_V_exp_top <- TU_V_AT_V_exp[TU_V_AT_V_t_namez, ]
+
+TU_V_AT_V_heat <- pheatmap(TU_V_AT_V_exp_top, cluster_rows = FALSE, cluster_cols = FALSE, fontsize_row = 40, hm_colors(500), scale= "row", cellwidth = 150, cellheight = 60, angle_col=45, fontsize_col=50)
+
+pdf(file.path(heat_dir, "TU_V_AT_V_exp_heatmap.pdf"), width=45, height=90)
+TU_V_AT_V_heat
+dev.off()
+
+
+
+TU_V_AT_V_heat_c <- pheatmap(TU_V_AT_V_exp_top, cluster_rows = TRUE, cluster_cols = FALSE, fontsize_row = 40, hm_colors(500), scale= "row", cellwidth = 150, cellheight = 60, treeheight_row=600, treeheight_col = 80, angle_col=45, fontsize_col=50)
+
+TU_V_AT_V_heat_c$gtable$grobs[[1]]$gp <- gpar(lwd = 7)
+
+pdf(file.path(clustered_heat_dir, "TU_V_AT_V_exp_heatmap_clustered.pdf"), width=55, height=90)
+TU_V_AT_V_heat_c
+dev.off()
+
+
+```
+
+
+```{r}
+
+
+AT_N_AT_V_t_heat <- rbind(AT_N_AT_V_up_50, AT_N_AT_V_down_50)
+                                
+AT_N_AT_V_t_namez <- rownames(AT_N_AT_V_t_heat )
+
+sample_names <- colnames(txi$abundance)
+
+
+
+AT_N_AT_V_exp <- txi$abundance[ , c(which(grepl("AT_V_UV", sample_names)),
+                                   which(grepl("AT_N_UV", sample_names)))]
+
+
+
+AT_N_AT_V_exp_top <- AT_N_AT_V_exp[AT_N_AT_V_t_namez, ]
+
+AT_N_AT_V_heat <- pheatmap(AT_N_AT_V_exp_top, cluster_rows = FALSE, cluster_cols = FALSE, fontsize_row = 40, hm_colors(500), scale= "row", cellwidth = 150, cellheight = 60, angle_col=45, fontsize_col=50)
+
+pdf(file.path(heat_dir, "AT_N_AT_V_exp_heatmap.pdf"), width=45, height=90)
+AT_N_AT_V_heat
+dev.off()
+
+
+
+AT_N_AT_V_heat_c <- pheatmap(AT_N_AT_V_exp_top, cluster_rows = TRUE, cluster_cols = FALSE, fontsize_row = 40, hm_colors(500), scale= "row", cellwidth = 150, cellheight = 60, treeheight_row=600, treeheight_col = 80, angle_col=45, fontsize_col=50)
+
+AT_N_AT_V_heat_c$gtable$grobs[[1]]$gp <- gpar(lwd = 7)
+
+pdf(file.path(clustered_heat_dir, "AT_N_AT_V_exp_heatmap_clustered.pdf"), width=55, height=90)
+AT_N_AT_V_heat_c
+dev.off()
+
+
+```
+
+```{r}
+
+TU_V_HC_V_t_heat <- rbind(TU_V_HC_V_up_50, TU_V_HC_V_down_50)
+                                
+TU_V_HC_V_t_namez <- rownames(TU_V_HC_V_t_heat )
+
+sample_names <- colnames(txi$abundance)
+
+
+
+TU_V_HC_V_exp <- txi$abundance[ , c(which(grepl("HC_V", sample_names)),
+                                   which(grepl("TU_V_UV", sample_names)))]
+
+
+
+TU_V_HC_V_exp_top <- TU_V_HC_V_exp[TU_V_HC_V_t_namez, ]
+
+TU_V_HC_V_heat <- pheatmap(TU_V_HC_V_exp_top, cluster_rows = FALSE, cluster_cols = FALSE, fontsize_row = 40, hm_colors(500), scale= "row", cellwidth = 150, cellheight = 60, angle_col=45, fontsize_col=50)
+
+pdf(file.path(heat_dir, "TU_V_HC_V_exp_heatmap.pdf"), width=45, height=90)
+TU_V_HC_V_heat
+dev.off()
+
+
+
+TU_V_HC_V_heat_c <- pheatmap(TU_V_HC_V_exp_top, cluster_rows = TRUE, cluster_cols = FALSE, fontsize_row = 40, hm_colors(500), scale= "row", cellwidth = 150, cellheight = 60, treeheight_row=600, treeheight_col = 80, angle_col=45, fontsize_col=50)
+
+TU_V_HC_V_heat_c$gtable$grobs[[1]]$gp <- gpar(lwd = 7)
+
+pdf(file.path(clustered_heat_dir, "TU_V_HC_V_exp_heatmap_clustered.pdf"), width=55, height=90)
+TU_V_HC_V_heat_c
+dev.off()
+
+
+
+```
+
+```{r}
+                                
+HC_N_HC_V_t_heat <- rbind(HC_N_HC_V_up_50, HC_N_HC_V_down_50)
+                                
+HC_N_HC_V_t_namez <- rownames(HC_N_HC_V_t_heat )
+
+sample_names <- colnames(txi$abundance)
+
+
+
+HC_N_HC_V_exp <- txi$abundance[ , c(which(grepl("HC_V", sample_names)),
+                                   which(grepl("HC_N", sample_names)))]
+
+
+
+HC_N_HC_V_exp_top <- HC_N_HC_V_exp[HC_N_HC_V_t_namez, ]
+
+HC_N_HC_V_heat <- pheatmap(HC_N_HC_V_exp_top, cluster_rows = FALSE, cluster_cols = FALSE, fontsize_row = 40, hm_colors(500), scale= "row", cellwidth = 150, cellheight = 60, angle_col=45, fontsize_col=50)
+
+pdf(file.path(heat_dir, "HC_N_HC_V_exp_heatmap.pdf"), width=45, height=90)
+HC_N_HC_V_heat
+dev.off()
+
+
+
+HC_N_HC_V_heat_c <- pheatmap(HC_N_HC_V_exp_top, cluster_rows = TRUE, cluster_cols = FALSE, fontsize_row = 40, hm_colors(500), scale= "row", cellwidth = 150, cellheight = 60, treeheight_row=600, treeheight_col = 80, angle_col=45, fontsize_col=50)
+
+HC_N_HC_V_heat_c$gtable$grobs[[1]]$gp <- gpar(lwd = 7)
+
+pdf(file.path(clustered_heat_dir, "HC_N_HC_V_exp_heatmap_clustered.pdf"), width=55, height=90)
+HC_N_HC_V_heat_c
+dev.off()
+
+
+```
+
+
+```{r}
+
+go.ora <- function(df, up_down, dir, fileName, db, plot_height, plot_width, pAdjustMethod, e_height, e_width) {
+
+# Get names of the genes
+gene_list <- row.names(df)
+
+# ORA GO
+ora_GO <- enrichGO(gene = gene_list,
+               OrgDb= db,
+               keyType = "SYMBOL",
+               pAdjustMethod = pAdjustMethod,
+               qvalueCutoff = 1)
+
+write.csv(ora_GO@result, file.path(dir, paste0(up_down, sep="_", fileName, sep="_", "ORA_GO.csv")))
+
+
+bp <- barplot(ora_GO, 
+        showCategory = ora_GO@result$Description, 
+        color = "pvalue") 
+
+# bp <- bp + theme(legend.position="none")
+
+
+pdf(file.path(dir, "plots", 
+              paste0(up_down, sep="_", fileName, sep="_", "ORA_GO_barplot.pdf")), 
+    height = plot_height, width=plot_width)
+print(bp)
+dev.off()
+
+
+
+ora_GO_2 <- pairwise_termsim(ora_GO)
+
+emap <- emapplot(ora_GO_2, color = "pvalue")
+
+pdf(file.path(dir, "plots", 
+              paste0(up_down, sep="_", fileName, sep="_", "ORA_GO_emap.pdf")), 
+    height = e_height, 
+    width=e_width)
+print(emap)
+dev.off()
+
+
+}
+
+```
+
+
+```{r}
+
+
+go.gsea <- function(df, up_down, dir, fileName, db, plot_height, plot_width, pAdjustMethod, e_height, e_width) {
+
+# Get fold change values with names 
+log2FC_list <- df$log2FC
+names(log2FC_list) <- rownames(df)
+log2FC_list <- na.omit(log2FC_list)
+log2FC_list = sort(log2FC_list, decreasing = TRUE)
+
+# GSEA GO
+gsea_GO <- gseGO(geneList=log2FC_list,
+                    ont ="ALL", 
+                    keyType = "SYMBOL",
+                    OrgDb = db,
+                    pAdjustMethod = pAdjustMethod,
+                 minGSSize = 3)
+
+write.csv(gsea_GO@result, file.path(dir, paste0(up_down, sep="_", fileName, sep="_", "GSEA_GO.csv")))
+
+
+dp <- dotplot(gsea_GO, 
+        showCategory = gsea_GO@result$Description, 
+        color = "pvalue")
+
+# dp <- dp + theme(legend.position="none")
+
+
+pdf(file.path(dir, "plots", 
+              paste0(up_down, sep="_", fileName, sep="_", "GSEA_GO_dotplot.pdf")), 
+    height = plot_height, width=plot_width)
+print(dp)
+dev.off()
+
+
+
+
+gsea_GO_2 <- pairwise_termsim(gsea_GO)
+emap <- emapplot(gsea_GO_2, color = "pvalue")
+
+pdf(file.path(dir, "plots", 
+              paste0(up_down, sep="_", fileName, sep="_", "GSEA_GO_emap.pdf")), 
+    height = e_height, 
+    width=e_width)
+print(emap)
+dev.off()
+
+
+}
+
+
+```
+
+
+```{r}
+
+kegg.ora <- function(df, up_down, dir, fileName, db, plot_height, plot_width, pAdjustMethod, e_height, e_width) {
+
+# Get names of the genes
+gene_list <- row.names(df)
+
+# Convert the names of the genes to ENTREZID for KEGG
+entrz_id <- bitr(gene_list, fromType="SYMBOL", toType=c("ENTREZID"), OrgDb="org.Mm.eg.db")
+
+# ORA KEGG
+ora_KEGG <- enrichKEGG(gene = entrz_id$ENTREZID,
+               organism = 'mmu',
+               use_internal_data = T,
+               pAdjustMethod = pAdjustMethod,
+               qvalueCutoff = 1)
+
+write.csv(ora_KEGG@result, file.path(dir, paste0(up_down, sep="_", fileName, sep="_", "ORA_KEGG.csv")))
+
+bp <- barplot(ora_KEGG, 
+        showCategory = ora_KEGG@result$Description, 
+        color = "pvalue")
+
+# bp <- bp + theme(legend.position="none")
+
+pdf(file.path(dir, "plots", 
+              paste0(up_down, sep="_", fileName, sep="_", "ORA_KEGG_barplot.pdf")), 
+    height = plot_height, width=plot_width)
+print(bp)
+dev.off()
+
+ora_KEGG_2 <- pairwise_termsim(ora_KEGG)
+
+emap <- emapplot(ora_KEGG_2, color = "pvalue")
+
+pdf(file.path(dir, "plots", 
+              paste0(up_down, sep="_", fileName, sep="_", "ORA_KEGG_emap.pdf")), 
+    height = e_height, 
+    width=e_width)
+print(emap)
+dev.off()
+
+}
+
+```
+
+
+```{r}
+
+# GSEA KEGG
+
+kegg.gsea <- function(df, up_down, dir, fileName, db, plot_height, plot_width, pAdjustMethod, e_height, e_width) {
+  
+# Get names of the genes
+gene_list <- row.names(df)
+
+# Get fold change values with ENTREZID as names 
+entrz_id <- bitr(gene_list, fromType="SYMBOL", toType=c("ENTREZID"), OrgDb="org.Mm.eg.db")
+log2FC_list <- df$log2FC
+names(log2FC_list) <- entrz_id$ENTREZID
+log2FC_list <- na.omit(log2FC_list)
+log2FC_list = sort(log2FC_list, decreasing = TRUE)
+
+gsea_KEGG <- gseKEGG(geneList=log2FC_list,
+                     organism = 'mmu',
+                     use_internal_data = T,
+                     pAdjustMethod = pAdjustMethod,
+                 minGSSize = 2)
+
+write.csv(gsea_KEGG@result, file.path(dir, paste0(up_down, sep="_", fileName, sep="_", "GSEA_KEGG.csv")))
+
+dp <- dotplot(gsea_KEGG, 
+        showCategory = gsea_KEGG@result$Description, 
+        color = "pvalue")
+
+# dp <- dp + theme(legend.position="none")
+
+pdf(file.path(dir, "plots",
+              paste0(up_down, sep="_", fileName, sep="_", "GSEA_KEGG_dotplot.pdf")), 
+    height = plot_height, width=plot_width)
+print(dp)
+dev.off()
+
+
+
+
+gsea_KEGG_2 <- pairwise_termsim(gsea_KEGG)
+emap <- emapplot(gsea_KEGG_2, color = "pvalue")
+
+pdf(file.path(dir, "plots", 
+              paste0(up_down, sep="_", fileName, sep="_", "GSEA_KEGG_emap.pdf")), 
+    height = e_height, 
+    width=e_width)
+print(emap)
+dev.off()
+
+}
+
+```
+
+```{r}
+
+# GO ORA
+
+# UP
+go.ora(TU_N_TU_V_up, up_down= "UP", dir = go_ora_up_dir, fileName= "TU_N_vs_TU_V", db= "org.Mm.eg.db", plot_height= 100, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+go.ora(TU_V_AT_V_up, up_down= "UP", dir = go_ora_up_dir, fileName= "TU_V_vs_AT_V", db= "org.Mm.eg.db", plot_height= 130, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+go.ora(AT_N_AT_V_up, up_down= "UP", dir = go_ora_up_dir, fileName= "AT_N_vs_AT_V", db= "org.Mm.eg.db", plot_height= 60, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+go.ora(TU_V_HC_V_up, up_down= "UP", dir = go_ora_up_dir, fileName= "TU_V_vs_HC_V", db= "org.Mm.eg.db", plot_height= 220, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+go.ora(HC_N_HC_V_up, up_down= "UP", dir = go_ora_up_dir, fileName= "HC_N_vs_HC_V", db= "org.Mm.eg.db", plot_height= 20, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+#DOWN
+go.ora(TU_N_TU_V_down, up_down= "DOWN", dir = go_ora_down_dir, fileName= "TU_N_vs_TU_V", db= "org.Mm.eg.db", plot_height= 100, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+go.ora(TU_V_AT_V_down, up_down= "DOWN", dir = go_ora_down_dir, fileName= "TU_V_vs_AT_V", db= "org.Mm.eg.db", plot_height= 250, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+go.ora(AT_N_AT_V_down, up_down= "DOWN", dir = go_ora_down_dir, fileName= "AT_N_vs_AT_V", db= "org.Mm.eg.db", plot_height= 20, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+go.ora(TU_V_HC_V_down, up_down= "DOWN", dir = go_ora_down_dir, fileName= "TU_V_vs_HC_V", db= "org.Mm.eg.db", plot_height= 300, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+go.ora(HC_N_HC_V_down, up_down= "DOWN", dir = go_ora_down_dir, fileName= "HC_N_vs_HC_V", db= "org.Mm.eg.db", plot_height= 20, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+```
+
+```{r}
+
+# GO GSEA
+
+# UP
+go.gsea(TU_N_TU_V_up, up_down= "UP", dir = go_gsea_up_dir, fileName= "TU_N_vs_TU_V", db= "org.Mm.eg.db", plot_height= 200, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+go.gsea(TU_V_AT_V_up, up_down= "UP", dir = go_gsea_up_dir, fileName= "TU_V_vs_AT_V", db= "org.Mm.eg.db", plot_height= 200, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+go.gsea(AT_N_AT_V_up, up_down= "UP", dir = go_gsea_up_dir, fileName= "AT_N_vs_AT_V", db= "org.Mm.eg.db", plot_height= 40, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+go.gsea(TU_V_HC_V_up, up_down= "UP", dir = go_gsea_up_dir, fileName= "TU_V_vs_HC_V", db= "org.Mm.eg.db", plot_height= 350, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+go.gsea(HC_N_HC_V_up, up_down= "UP", dir = go_gsea_up_dir, fileName= "HC_N_vs_HC_V", db= "org.Mm.eg.db", plot_height= 80, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+#DOWN
+go.gsea(TU_N_TU_V_down, up_down= "DOWN", dir = go_gsea_down_dir, fileName= "TU_N_vs_TU_V", db= "org.Mm.eg.db", plot_height= 150, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+go.gsea(TU_V_AT_V_down, up_down= "DOWN", dir = go_gsea_down_dir, fileName= "TU_V_vs_AT_V", db= "org.Mm.eg.db", plot_height= 200, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+go.gsea(AT_N_AT_V_down, up_down= "DOWN", dir = go_gsea_down_dir, fileName= "AT_N_vs_AT_V", db= "org.Mm.eg.db", plot_height= 10, plot_width = 10, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+go.gsea(TU_V_HC_V_down, up_down= "DOWN", dir = go_gsea_down_dir, fileName= "TU_V_vs_HC_V", db= "org.Mm.eg.db", plot_height= 300, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+go.gsea(HC_N_HC_V_down, up_down= "DOWN", dir = go_gsea_down_dir, fileName= "HC_N_vs_HC_V", db= "org.Mm.eg.db", plot_height= 10, plot_width = 10, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+```
+
+```{r}
+
+# KEGG ORA
+
+# UP
+kegg.ora(TU_N_TU_V_up, up_down= "UP", dir = kegg_ora_up_dir, fileName= "TU_N_vs_TU_V", db= "org.Mm.eg.db", plot_height= 20, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+kegg.ora(TU_V_AT_V_up, up_down= "UP", dir = kegg_ora_up_dir, fileName= "TU_V_vs_AT_V", db= "org.Mm.eg.db", plot_height= 20, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+kegg.ora(AT_N_AT_V_up, up_down= "UP", dir = kegg_ora_up_dir, fileName= "AT_N_vs_AT_V", db= "org.Mm.eg.db", plot_height= 15, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+kegg.ora(TU_V_HC_V_up, up_down= "UP", dir = kegg_ora_up_dir, fileName= "TU_V_vs_HC_V", db= "org.Mm.eg.db", plot_height= 20, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+kegg.ora(HC_N_HC_V_up, up_down= "UP", dir = kegg_ora_up_dir, fileName= "HC_N_vs_HC_V", db= "org.Mm.eg.db", plot_height= 15, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+#DOWN
+kegg.ora(TU_N_TU_V_down, up_down= "DOWN", dir = kegg_ora_down_dir, fileName= "TU_N_vs_TU_V", db= "org.Mm.eg.db", plot_height= 20, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+kegg.ora(TU_V_AT_V_down, up_down= "DOWN", dir = kegg_ora_down_dir, fileName= "TU_V_vs_AT_V", db= "org.Mm.eg.db", plot_height= 20, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+kegg.ora(AT_N_AT_V_down, up_down= "DOWN", dir = kegg_ora_down_dir, fileName= "AT_N_vs_AT_V", db= "org.Mm.eg.db", plot_height= 10, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+kegg.ora(TU_V_HC_V_down, up_down= "DOWN", dir = kegg_ora_down_dir, fileName= "TU_V_vs_HC_V", db= "org.Mm.eg.db", plot_height= 50, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+kegg.ora(HC_N_HC_V_down, up_down= "DOWN", dir = kegg_ora_down_dir, fileName= "HC_N_vs_HC_V", db= "org.Mm.eg.db", plot_height= 10, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+
+```
+
+
+```{r}
+
+# KEGG GSEA
+
+# UP
+kegg.gsea(TU_N_TU_V_up, up_down= "UP", dir = kegg_gsea_up_dir, fileName= "TU_N_vs_TU_V", db= "org.Mm.eg.db", plot_height= 10, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+kegg.gsea(TU_V_AT_V_up, up_down= "UP", dir = kegg_gsea_up_dir, fileName= "TU_V_vs_AT_V", db= "org.Mm.eg.db", plot_height= 10, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+# kegg.gsea(AT_N_AT_V_up, up_down= "UP", dir = kegg_gsea_up_dir, fileName= "AT_N_vs_AT_V", db= "org.Mm.eg.db", plot_height= 10, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+kegg.gsea(TU_V_HC_V_up, up_down= "UP", dir = kegg_gsea_up_dir, fileName= "TU_V_vs_HC_V", db= "org.Mm.eg.db", plot_height= 10, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+kegg.gsea(HC_N_HC_V_up, up_down= "UP", dir = kegg_gsea_up_dir, fileName= "HC_N_vs_HC_V", db= "org.Mm.eg.db", plot_height= 10, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+#DOWN
+kegg.gsea(TU_N_TU_V_down, up_down= "DOWN", dir = kegg_gsea_down_dir, fileName= "TU_N_vs_TU_V", db= "org.Mm.eg.db", plot_height= 10, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+kegg.gsea(TU_V_AT_V_down, up_down= "DOWN", dir = kegg_gsea_down_dir, fileName= "TU_V_vs_AT_V", db= "org.Mm.eg.db", plot_height= 10, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+#kegg.gsea(AT_N_AT_V_down, up_down= "DOWN", dir = kegg_gsea_down_dir, fileName= "AT_N_vs_AT_V", db= "org.Mm.eg.db", plot_height= 10, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+kegg.gsea(TU_V_HC_V_down, up_down= "DOWN", dir = kegg_gsea_down_dir, fileName= "TU_V_vs_HC_V", db= "org.Mm.eg.db", plot_height= 10, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+#kegg.gsea(HC_N_HC_V_down, up_down= "DOWN", dir = kegg_gsea_down_dir, fileName= "HC_N_vs_HC_V", db= "org.Mm.eg.db", plot_height= 10, plot_width = 15, pAdjustMethod = 'none', e_height= 20, e_width = 20)
+
+
+```
+
+
